@@ -8,6 +8,6 @@ fi
 
 echo -n "Computing diff... "
 
-git diff --name-only 32978a18fde64152bf8e94b2076789df9616db79 > changed-files.list
+git diff --name-only 8de4188f9233bce734fab23088fafb8a187f8c9b > changed-files.list
 
 echo "[Done]"
