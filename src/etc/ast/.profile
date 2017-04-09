@@ -45,5 +45,5 @@ cd
 mkdir -p /mnt/shared
 mount -t vbfs -o share=share none /mnt/shared
 
-alias ossync="cd /mnt/shared/tools && bash import-changed-files.sh"
+alias ossync="OLD_DIR=$(pwd) && cd /mnt/shared/tools && bash import-changed-files.sh && cd $OLD_DIR"
 alias recomp="cd /home/repo/src/releasetools && make hdboot"
