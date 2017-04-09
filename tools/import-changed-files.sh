@@ -8,6 +8,6 @@ fi
 
 echo "Syncing changed files... "
 
-rsync -c --progress --files-from=/mnt/virtual_shared/project3-fs/tools/changed-files.list /mnt/virtual_shared/project3-fs/ /home/repo
+rsync -c --progress --files-from=/mnt/shared/tools/changed-files.list /mnt/shared/ /home/repo
 
 echo "[Done]"
