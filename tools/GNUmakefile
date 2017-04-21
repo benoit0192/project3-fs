@@ -1,4 +1,4 @@
-BINS=directory_walker
+BINS=directory_walker inode_bitmap_walker zone_bitmap_walker
 CC=clang
 CFLAGS=-Wall
 IFLAGS=-I../src/minix/fs

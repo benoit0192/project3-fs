@@ -9,21 +9,12 @@
 #include <limits.h>
 #include <fcntl.h>
 
+#include <minix/const.h>
+#include <minix/type.h>
 #include "mfs/const.h"
-#define EXTERN extern
 #include "mfs/super.h"
-
-typedef struct {		/* V2.x disk inode */
-  unsigned short d2_mode;		/* file type, protection, etc. */
-  unsigned short d2_nlinks;		/* how many links to this file. HACK! */
-  short d2_uid;			        /* user id of the file's owner. */
-  unsigned short d2_gid;		/* group number HACK! */
-  int d2_size;		            /* current file size in bytes */
-  unsigned int d2_atime;		/* when was file data last accessed */
-  unsigned int d2_mtime;		/* when was file data last changed */
-  unsigned int d2_ctime;		/* when was inode data last changed */
-  int d2_zone[V2_NR_TZONES];	/* block nums for direct, ind, and dbl ind */
-} d2_inode;
+#include "mfs/inode.h"
+#include "mfs/type.h"
 
 int read_superblock(int dev_fd, struct super_block *sb) {
     if(lseek(dev_fd, SUPER_BLOCK_BYTES, SEEK_SET) < 0) {
@@ -32,6 +23,10 @@ int read_superblock(int dev_fd, struct super_block *sb) {
     }
     if( read(dev_fd, sb, sizeof(*sb)) != sizeof(*sb) ) {
         perror("Can't read superblock");
+        return -1;
+    }
+    if(sb->s_magic != SUPER_V3) {
+        fprintf(stderr, "Wrong magic number\n");
         return -1;
     }
     return 0;
@@ -147,18 +142,18 @@ void print_data_zones(dev_t dev, ino_t inode_number) {
         perror("Can't seek to inode");
         return;
     }
-    d2_inode in;
+    struct inode in;
     if( read(dev_fd, &in, sizeof(in)) != sizeof(in) ) {
         perror("Can't read inode");
         return;
     }
 
     /* print data blocks */
-    printf("%u [", in.d2_mtime);
+    printf("%u [", in.i_mtime);
     for(int i = 0; i < V2_NR_TZONES-1; ++i) {
-        printf("%d,", in.d2_zone[i]);
+        printf("%d,", in.i_zone[i]);
     }
-    printf("%d]", in.d2_zone[V2_NR_TZONES-1]);
+    printf("%d]", in.i_zone[V2_NR_TZONES-1]);
 
     close(dev_fd);
 }
