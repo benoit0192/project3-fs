@@ -149,11 +149,28 @@ void print_data_zones(dev_t dev, ino_t inode_number) {
     }
 
     /* print data blocks */
-    printf("%u [", in.i_mtime);
-    for(int i = 0; i < V2_NR_TZONES-1; ++i) {
+    printf("[");
+    // direct zones
+    for(int i = 0; i < V2_NR_DZONES && in.i_zone[i]; ++i) {
         printf("%d,", in.i_zone[i]);
     }
-    printf("%d]", in.i_zone[V2_NR_TZONES-1]);
+    // simple indirect zones
+    if(in.i_zone[V2_NR_DZONES]) {
+        int zone_offset = (in.i_zone[V2_NR_DZONES] << sb.s_log_zone_size) * sb.s_block_size;
+        u32_t ind_zones[V2_INDIRECTS(sb.s_block_size)];
+        if( lseek(dev_fd, zone_offset, SEEK_SET) < 0 ) {
+            perror("Can't seek to zone");
+            return;
+        }
+        if( read(dev_fd, ind_zones, V2_INDIRECTS(sb.s_block_size)) < 0 ) {
+            perror("Can't read zones");
+            return;
+        }
+        for(int i = 0; i < V2_INDIRECTS(sb.s_block_size) && ind_zones[i]; ++i) {
+            printf("%d,", ind_zones[i]);
+        }
+    }
+    printf("]");
 
     close(dev_fd);
 }
