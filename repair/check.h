@@ -20,5 +20,7 @@ void print_superblock();
 void check_superblock();
 void check_imap();
 void check_zmap();
+void check_dots();
+void check_directories();
 
 #endif // __CHECK_H__

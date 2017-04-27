@@ -17,11 +17,11 @@ int get_random_map_number(int val, int map_flag) {
     int max_index;
     if(map_flag == MAP_FLAG_IMAP) {
         map = alloc_bitmap(N_IMAP);
-        rw_bitmap(imap, BLK_IMAP, N_IMAP, READ);
+        rw_bitmap(map, BLK_IMAP, N_IMAP, READ);
         max_index = sb.s_ninodes;
     } else {
         map = alloc_bitmap(N_ZMAP);
-        rw_bitmap(imap, BLK_ZMAP, N_ZMAP, READ);
+        rw_bitmap(map, BLK_ZMAP, N_ZMAP, READ);
         max_index = sb.s_zones;
     }
     int i, count = 0;
@@ -45,6 +45,14 @@ void set_imap_bit(int inode_nr, int val) {
     bit_set(imap, inode_nr, val);
     rw_bitmap(imap, BLK_IMAP, N_IMAP, WRITE);
     free(imap);
+}
+
+void set_zmap_bit(int zone_nr, int val) {
+    bitchunk_t *zmap = alloc_bitmap(N_ZMAP);
+    rw_bitmap(zmap, BLK_ZMAP, N_ZMAP, READ);
+    bit_set(zmap, zone_nr, val);
+    rw_bitmap(zmap, BLK_ZMAP, N_ZMAP, WRITE);
+    free(zmap);
 }
 
 void damage_imap_menu() {
@@ -112,14 +120,122 @@ void damage_zmap_menu() {
             case '3':
                 printf("Which data zone? ");
                 scanf("%d", &n); empty_stdin();
-                set_imap_bit(n - sb.s_firstdatazone + 1, 0);
+                set_zmap_bit(n - sb.s_firstdatazone + 1, 0);
                 printf("Unallocated data zone %d in zmap\n", n);
                 break;
             case '4':
                 printf("Which data zone? ");
                 scanf("%d", &n); empty_stdin();
-                set_imap_bit(n - sb.s_firstdatazone + 1, 1);
+                set_zmap_bit(n - sb.s_firstdatazone + 1, 1);
                 printf("Allocated data zone %d in zmap\n", n);
+                break;
+            case 'B':
+            case 'b':
+                keepOn = 0;
+                break;
+            default:
+                printf("Invalid choice: %c\n", answer);
+        }
+    }
+}
+
+int get_random_directory_inode() {
+    // count directories
+    int dir_count = 0;
+    if(lseek(device, block2byte(BLK_ILIST), SEEK_SET) != block2byte(BLK_ILIST))
+        die("get_random_directory_inode: can't seek ilist: %s", strerror(errno));
+    struct inode in;
+    for(int i = 1; i <= sb.s_ninodes; ++i) {
+        if(read(device, &in, INODE_SIZE) != INODE_SIZE)
+            die("get_random_directory_number: can't read inode: %s", strerror(errno));
+        if((in.i_mode & I_TYPE) == I_DIRECTORY)
+            dir_count++;
+    }
+    // select a directory anong those available
+    int select = rand() % dir_count;
+    dir_count = 0;
+    if(lseek(device, block2byte(BLK_ILIST), SEEK_SET) != block2byte(BLK_ILIST))
+        die("get_random_directory_inode: can't seek ilist: %s", strerror(errno));
+    int i;
+    for(i = 1; i <= sb.s_ninodes && dir_count < select; ++i) {
+        if(read(device, &in, INODE_SIZE) != INODE_SIZE)
+            die("get_random_directory_number: can't read inode: %s", strerror(errno));
+        if((in.i_mode & I_TYPE) == I_DIRECTORY)
+            dir_count++;
+    }
+    return i-1;
+}
+
+void change_dir_entry(int inode, char *entryname) {
+    modified = 0;
+    int inode_offset = block2byte(BLK_ILIST) + (inode-1) * INODE_SIZE;
+    if(lseek(device, inode_offset, SEEK_SET) != inode_offset)
+        die("change_dir_entry: can't seek ilist: %s", strerror(errno));
+    struct inode in;
+    if(read(device, &in, INODE_SIZE) != INODE_SIZE)
+        die("change_dir_entry: can't read inode: %s", strerror(errno));
+    struct dirent_list *l = get_dir_entries(&in);
+    struct dirent_list *it = l;
+    while(it) {
+        if(!strcmp(it->name, entryname)) {
+            if(ask("Set a new inode number? [y/n]") == 'y') { // 14751
+                int n;
+                printf("new inode number: ");
+                scanf("%d", &n); empty_stdin();
+                it->ino = n;
+                modified = 1;
+            }
+            if(ask("Set a new inode name? [y/n]") == 'y') {
+                char buf[MFS_DIRSIZ];
+                printf("new inode name: ");
+                scanf("%s", buf); empty_stdin();
+                for(int k = 0; k < MFS_DIRSIZ; ++k)
+                    it->name[k] = buf[k];
+                modified = 1;
+            }
+        }
+        it = it->next;
+    }
+    if(modified) {
+        flush_dir_entries(inode, &in, l);
+        modified = 0;
+    }
+}
+
+void damage_directory_menu() {
+    int keepOn = 1;
+    while(keepOn) {
+        printf("   ---- damage directory ----\n");
+        printf("\n");
+        printf("    What do you want to do?\n");
+        printf("        [1] get a random directory inode\n");
+        printf("        [2] change . entry of a directory\n");
+        printf("        [3] change .. entry of a directory\n");
+        printf("        [4] change an entry of a directory\n");
+        printf("        [B] Back\n");
+        char answer = ask("");
+        int n;
+        char buf[MFS_DIRSIZ];
+        switch(answer) {
+            case '1':
+                printf("Random directory inode: %d\n", get_random_directory_inode());
+                break;
+            case '2':
+                printf("Which inode? ");
+                scanf("%d", &n); empty_stdin();
+                change_dir_entry(n, ".");
+                break;
+            case '3':
+                printf("Which inode? ");
+                scanf("%d", &n); empty_stdin();
+                change_dir_entry(n, "..");
+                break;
+            case '4':
+                printf("Which inode? ");
+                scanf("%d", &n); empty_stdin();
+                printf("Which filename");
+                scanf("%s", buf); empty_stdin();
+                change_dir_entry(n, buf);
                 break;
             case 'B':
             case 'b':
@@ -138,7 +254,8 @@ void menu() {
         printf("\n");
         printf("    What do you want to do?\n");
         printf("        [1] Damage imap\n");
-        printf("        [2] Damage ilist\n");
+        printf("        [2] Damage zmap\n");
+        printf("        [3] Damage directory\n");
         printf("        [Q] Quit\n");
         char answer = ask("");
         switch(answer) {
@@ -146,7 +263,10 @@ void menu() {
                 damage_imap_menu();
                 break;
             case '2':
-
+                damage_zmap_menu();
+                break;
+            case '3':
+                damage_directory_menu();
                 break;
             case 'Q':
             case 'q':
@@ -156,6 +276,11 @@ void menu() {
                 printf("Invalid choice: %c\n", answer);
         }
     }
+}
+
+void print_usage(char *progname) {
+    fprintf(stderr, "Usage: %s [--force|-f] <block device file>\n", progname);
+    fprintf(stderr, "Example: %s -f /dev/c0d0p0s0\n", progname);
 }
 
 int main(int argc, char *argv[]) {

@@ -26,7 +26,7 @@ EXTERN int device;
 /* super block of current device */
 EXTERN struct super_block sb;
 
-/*  */
+/* modified flag to flush modifs */
 EXTERN int modified;
 
 #endif // __REPAIR_GLO_H__

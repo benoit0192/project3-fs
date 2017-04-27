@@ -173,8 +173,43 @@ void check_zmap() {
     char *zmap_built_char = (char*)zmap_built;
     for(int k = 0; k < N_ZMAP * sb.s_block_size; ++k) {
        if(zmap_char[k] != zmap_built_char[k]) {
-
-           printf("%d-th zmap byte are differents!\n", k);
+           // bytes do not match. look for rebel bits
+           char mask = 1;
+           for(int b = 0; b < 8; ++b, mask <<= 1) {
+               int bit_off = k * 8 + b;
+               int data_zone = bit_off + sb.s_firstdatazone - 1;
+               char zmap_bit = zmap_char[k] & mask;
+               char zmap_built_bit = zmap_built_char[k] & mask;
+               if( zmap_bit && !zmap_built_bit ) {
+                   printf("check_zmap: data zone %d is allocated in zmap but no inode references it\n", data_zone);
+                   err_count++;
+                   if(repair) {
+                       char answer;
+                       if((answer = ask("Do you want to de-allocate it in the zmap? [y/n]")) == 'y') {
+                           bit_set(zmap, bit_off, 0);
+                           modified = 1;
+                           fix_count++;
+                           printf("zmap modified\n");
+                       } else {
+                           printf("Ok, I won't change it.\n");
+                       }
+                   }
+               } else if( !zmap_bit && zmap_built_bit ) {
+                   printf("check_zmap: data zone %d is not allocated in zmap but is referenced by at least one inode\n", data_zone);
+                   err_count++;
+                   if(repair) {
+                       char answer;
+                       if((answer = ask("Do you want to allocate it in the zmap? [y/n]")) == 'y') {
+                           bit_set(zmap, bit_off, 1);
+                           modified = 1;
+                           fix_count++;
+                           printf("zmap modified\n");
+                       } else {
+                           printf("Ok, I won't change it.\n");
+                       }
+                   }
+               }
+           }
        }
     }
 
@@ -189,4 +224,188 @@ void check_zmap() {
         printf("zmap seems to be clean\n");
     else
         printf("%d errors found in zmap. %d of them were fixed.\n", err_count, fix_count);
+}
+
+void check_dots() {
+    printf("Checking dots...\n");
+    int err_count = 0;
+    int fix_count = 0;
+
+    // look for directories, and check their . and .. values
+    struct inode in;
+    for(int i = 1; i <= sb.s_ninodes; ++i) {
+        int inode_offset = block2byte(BLK_ILIST) + (i-1) * INODE_SIZE;
+        if(lseek(device, inode_offset, SEEK_SET) != inode_offset)
+            die("check_dots: can't seek inode list: %s", strerror(errno));
+        if(read(device, &in, INODE_SIZE) != INODE_SIZE)
+            die("check_dots: can't read %d-th inode: %s", i, strerror(errno));
+        if((in.i_mode & I_TYPE) != I_DIRECTORY)
+            continue;
+        // check directory content
+        struct dirent_list *l = get_dir_entries(&in);
+        struct dirent_list *it = l; // iterator
+        while(it) {
+            // do not open recursively . and ..
+            if(!strcmp(it->name, ".")) {
+                it = it->next;
+                continue;
+            } else if(!strcmp(it->name, "..")) {
+                it = it->next;
+                continue;
+            }
+            // read subdirectories to check their . and .. values
+            struct inode child_inode;
+            int child_inode_offset = block2byte(BLK_ILIST) + (it->ino-1) * INODE_SIZE;
+            if(lseek(device, child_inode_offset, SEEK_SET) != child_inode_offset)
+                die("check_dots: can't seek child inode: %s", strerror(errno));
+            if(read(device, &child_inode, INODE_SIZE) != INODE_SIZE)
+                die("check_dots: can't read child inode: %s", strerror(errno));
+            if((child_inode.i_mode & I_TYPE) != I_DIRECTORY) {
+                it = it->next;
+                continue;
+            }
+            struct dirent_list *l_child = get_dir_entries(&child_inode);
+            struct dirent_list *child_it = l_child;
+            int has_dot = 0, has_dot_dot = 0;
+            while(child_it) {
+                if(!strcmp(child_it->name, ".")) {
+                    has_dot = 1;
+                    if(child_it->ino != it->ino) {
+                        err_count++;
+                        printf(". entry of directory inode %llu is not pointing to itself\n", it->ino);
+                        if(repair) {
+                            if(ask("Do you want to set it to its own inode value? [y/n]") == 'y') {
+                                child_it->ino = it->ino;
+                                fix_count++;
+                                modified = 1;
+                                printf(". entry fixed\n");
+                            } else {
+                                printf("Ok, I won't change it.\n");
+                            }
+                        }
+                    }
+                } else if(!strcmp(child_it->name, "..")) {
+                    has_dot_dot = 1;
+                    if(child_it->ino != i) {
+                        printf(".. entry of directory inode %llu is not pointing to its parent %d\n", it->ino, i);
+                        if(repair) {
+                            if(ask("Do you want to set it to its parent inode value? [y/n]") == 'y') {
+                                child_it->ino = i;
+                                fix_count++;
+                                modified = 1;
+                                printf(".. entry fixed\n");
+                            } else {
+                                printf("Ok, I won't change it.\n");
+                            }
+                        }
+                    }
+                }
+                child_it = child_it->next;
+            }
+            if(!has_dot) {
+                printf("directory inode %llu doesn't have a . entry!\n", it->ino);
+                err_count++;
+                if(repair) {
+                    if(ask("Do you want to add a . entry? [y/n]") == 'y') {
+                        struct dirent_list *new = malloc(sizeof(*new));
+                        new->ino = it->ino;
+                        for(int k = 0; k < MFS_DIRSIZ; ++k)
+                            new->name[k] = 0;
+                        new->name[0] = '.';
+                        new->next = l_child;
+                        l_child = new;
+                        fix_count++;
+                        modified = 1;
+                        printf(". entry fixed\n");
+                    } else {
+                        printf("Ok, I won't change it.\n");
+                    }
+                }
+            }
+            if(!has_dot_dot) {
+                printf("directory inode %d doesn't have a .. entry!\n", i);
+                err_count++;
+                if(repair) {
+                    if(ask("Do you want to add a .. entry? [y/n]") == 'y') {
+                        struct dirent_list *new = malloc(sizeof(*new));
+                        new->ino = i;
+                        for(int k = 0; k < MFS_DIRSIZ; ++k)
+                            new->name[k] = 0;
+                        new->name[0] = '.'; new->name[1] = '.';
+                        new->next = l_child;
+                        l_child = new;
+                        fix_count++;
+                        modified = 1;
+                        printf(".. entry fixed\n");
+                    } else {
+                        printf("Ok, I won't change it.\n");
+                    }
+                }
+            }
+            if(modified) {
+                flush_dir_entries(it->ino, &child_inode, l_child);
+                modified = 0;
+            }
+            free_dirent_list(l_child);
+            it = it->next;
+        }
+        free_dirent_list(l);
+    }
+
+    if(err_count == 0)
+        printf("directory dots seem to be clean\n");
+    else
+        printf("%d errors found in directory dots. %d of them were fixed.\n", err_count, fix_count);
+}
+
+void check_directories() {
+    printf("Checking directories...\n");
+    int err_count = 0;
+    int fix_count = 0;
+
+    // access map. each inode gets a 1 if there is an entry for it in a directory
+    char *amap = (char*)alloc_bitmap(N_IMAP);
+    amap[0] |= 0b11; // inode 0 and root inode are always reachable
+
+    // iterate over directory inodes and look at their contents
+    struct inode in;
+    for(int i = 1; i <= sb.s_ninodes; ++i) {
+        int inode_offset = block2byte(BLK_ILIST) + (i-1) * INODE_SIZE;
+        if(lseek(device, inode_offset, SEEK_SET) != inode_offset)
+            die("check_directory: can't seek inode list: %s", strerror(errno));
+        if(read(device, &in, INODE_SIZE) != INODE_SIZE)
+            die("check_directory: can't read %d-th inode: %s", i, strerror(errno));
+        if((in.i_mode & I_TYPE) != I_DIRECTORY)
+            continue;
+        struct dirent_list *l = get_dir_entries(&in);
+        for(struct dirent_list *it = l; it; it = it->next) {
+            // do not open recursively . and ..
+            if(!strcmp(it->name, ".")) continue;
+            if(!strcmp(it->name, "..")) continue;
+            // all inodes in this directory are reachable
+            bit_set(amap, it->ino, 1);
+        }
+        free_dirent_list(l);
+    }
+
+    // now we are looking for inodes which are either:
+    //  - not allocated but reachable (we remove the entry reaching them)
+    //  - allocated but not reachable (we add an inode for them in /lost+found)
+    char *imap = (char*)alloc_bitmap(N_IMAP);
+    rw_bitmap((bitchunk_t*)imap, BLK_IMAP, N_IMAP, READ);
+    for(int i = 1; i <= sb.s_ninodes; ++i) {
+        if(!bit_at(imap, i) && bit_at(amap, i)) {
+            printf("inode %d is not allocated but is reachable\n", i);
+            err_count++;
+
+        } else if(bit_at(imap, i) && !bit_at(amap, i)) {
+            printf("inode %d is allocated but is not reachable\n", i);
+            err_count++;
+        }
+    }
+
+    if(err_count == 0)
+        printf("directories seem to be clean\n");
+    else
+        printf("%d errors found in directories. %d of them were fixed.\n", err_count, fix_count);
 }

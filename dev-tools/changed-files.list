@@ -1,6 +1,3 @@
-dev-tools/import-changed-files.sh
-dev-tools/list-changed-files.sh
-src/etc/ast/.profile
 tools/GNUmakefile
 tools/directory_walker.c
 tools/inode_bitmap_walker.c

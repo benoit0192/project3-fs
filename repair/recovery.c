@@ -9,6 +9,10 @@
 #define _MAIN
 #include "glo.h"
 
+void print_usage(char *progname) {
+    fprintf(stderr, "Usage: %s [--repair|-r] [--force|-f] <block device file>\n", progname);
+    fprintf(stderr, "Example: %s -r /dev/c0d0p0s0\n", progname);
+}
 
 int main(int argc, char *argv[]) {
     repair = 0; force = 0; device_file = NULL; device = -1; modified = 0;
@@ -73,6 +77,8 @@ int main(int argc, char *argv[]) {
 
     check_imap();
     check_zmap();
+    check_dots();
+    check_directories();
 
     sync();
 

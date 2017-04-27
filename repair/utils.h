@@ -12,6 +12,7 @@
 #include <string.h>
 #include <minix/minlib.h>
 #include "glo.h"
+#include "mfs/mfsdir.h"
 
 #define div_ceil(x,y) ((((x) - 1) / (y)) + 1) /* ceiling of the division of x by y */
 
@@ -23,7 +24,7 @@
 #define INODES_PER_BLOCK V2_INODES_PER_BLOCK(sb.s_block_size)
 #define INODE_SIZE V2_INODE_SIZE
 
-#define block2byte(b)   ((off_t)(b) * sb.s_block_size)
+#define block2byte(b)   ((u32_t)(b) * sb.s_block_size)
 #define zone2block(z)   ((block_t)(z) << sb.s_log_zone_size)
 #define BLOCK_PER_ZONE  ((int)zone2block(1))
 
@@ -41,7 +42,6 @@
 int is_block_device(char *filename);
 char *get_mountpoint(char *filename);
 void die(const char *fmt, ...);
-void print_usage(char *progname);
 void empty_stdin();
 char ask(char *question);
 bitchunk_t *alloc_bitmap(int nb_blocks);

@@ -28,11 +28,6 @@ void die(const char *fmt, ...) {
     exit(EXIT_FAILURE);
 }
 
-void print_usage(char *progname) {
-    fprintf(stderr, "Usage: %s [--repair|-r] <block device file>\n", progname);
-    fprintf(stderr, "Example: %s -r /dev/c0d0p0s0\n", progname);
-}
-
 void empty_stdin() {
     char c;
     while((c = getchar()) != '\n' && c != EOF);
